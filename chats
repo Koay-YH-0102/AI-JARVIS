@@ -1,0 +1,4 @@
+Saved chats land here automatically as `<conversation_id>.json` files —
+one per conversation, created the first time you send a message and updated
+after every turn. Nothing to do here manually — browse them from the app's
+**History** tab, or open the .json files directly if you want the raw data.
