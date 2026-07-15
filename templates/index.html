@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>J.A.R.V.I.S. — Local Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="core-mini" id="core-mini"><div class="ring r1"></div><div class="ring r2"></div><div class="dot"></div></div>
+      <div class="brand-text">
+        <span class="eyebrow">J.A.R.V.I.S. · LOCAL CONSOLE</span>
+        <h1>Just A Really Virtuous Intelligent System</h1>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="status-chip" id="conn-status"><span class="led off"></span>Not configured</div>
+      <button class="icon-btn" id="new-chat-btn" title="New chat">+</button>
+      <button class="icon-btn" id="settings-btn" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <nav class="tabbar">
+    <button class="tab active" data-tab="chat">💬 Chat</button>
+    <button class="tab" data-tab="tasks">✅ Tasks</button>
+    <button class="tab" data-tab="files">📁 Files</button>
+    <button class="tab" data-tab="notifications">🔔 Notifications<span class="tab-badge" id="tab-notif-badge"></span></button>
+    <button class="tab" data-tab="history">🗂 History</button>
+    <button class="tab" data-tab="core">🌀 Core</button>
+  </nav>
+
+  <main class="layout">
+
+    <div class="main-column">
+
+      <!-- ---------------- CHAT ---------------- -->
+      <section class="tab-panel chat-panel active" id="panel-chat">
+        <div class="chat-scroll" id="chat-scroll">
+          <div class="msg system">
+            <p>J.A.R.V.I.S. online. Open <strong>Settings</strong> to pick a provider — OpenRouter, local Ollama, or Google AI Studio. Try the 🎤 to talk instead of type, attach files with 📎, or add things to the <strong>Tasks</strong> tab for later. Anything risky shows up under <strong>Notifications</strong> for you to approve or deny, and every chat auto-saves so you can find it again in <strong>History</strong>.</p>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="composer-attachments" id="composer-attachments"></div>
+          <div class="composer-row">
+            <button class="icon-btn small" id="attach-btn" title="Attach files">📎</button>
+            <input type="file" id="file-input" multiple hidden>
+            <textarea id="chat-input" rows="1" placeholder="Tell J.A.R.V.I.S. what to do… (Shift+Enter for a new line)"></textarea>
+            <button class="icon-btn small" id="mic-btn" title="Voice input">🎤</button>
+            <button id="send-btn">Send</button>
+          </div>
+          <p class="hint composer-hint" id="voice-hint"></p>
+        </div>
+      </section>
+
+      <!-- ---------------- TASKS ---------------- -->
+      <section class="tab-panel" id="panel-tasks">
+        <div class="panel-scroll">
+          <div class="task-add-row">
+            <input type="text" id="task-input" placeholder="Something you want J.A.R.V.I.S. to do…">
+            <button class="btn primary" id="task-add-btn">Add</button>
+          </div>
+          <p class="hint">Tasks are a to-do list for J.A.R.V.I.S. — add one, then hit Run to send it to Chat, or check it off when it's done by hand.</p>
+          <div class="task-list" id="task-list"><p class="hint">No tasks yet.</p></div>
+        </div>
+      </section>
+
+      <!-- ---------------- FILES ---------------- -->
+      <section class="tab-panel" id="panel-files">
+        <div class="panel-scroll">
+          <div class="task-add-row">
+            <button class="btn primary" id="files-upload-btn">Upload files</button>
+            <input type="file" id="files-tab-input" multiple hidden>
+          </div>
+          <p class="hint">Files uploaded here or from the chat composer land in the <code>uploads/</code> folder. Text, PDF, and Word contents are read automatically when attached to a message; images may be seen by vision-capable models; audio/video are stored but not transcribed.</p>
+          <div class="file-list" id="file-list"><p class="hint">No files uploaded yet.</p></div>
+        </div>
+      </section>
+
+      <!-- ---------------- NOTIFICATIONS ---------------- -->
+      <section class="tab-panel" id="panel-notifications">
+        <div class="panel-scroll">
+          <p class="hint">Risky actions pause here instead of running automatically. Approve or deny each one.</p>
+          <div class="notif-list" id="notif-list"><p class="hint">No notifications yet.</p></div>
+        </div>
+      </section>
+
+      <!-- ---------------- HISTORY ---------------- -->
+      <section class="tab-panel" id="panel-history">
+        <div class="panel-scroll">
+          <p class="hint">Every chat auto-saves to a file in the <code>chats/</code> folder next to app.py.</p>
+          <div class="chats-list" id="chats-list"><p class="hint">No saved chats yet.</p></div>
+        </div>
+      </section>
+
+      <!-- ---------------- CORE (focus view) ---------------- -->
+      <section class="tab-panel core-tab-panel" id="panel-core">
+        <div class="core-wrap core-wrap-focus" id="core-wrap-focus">
+          <svg id="core-svg-focus" class="core-svg core-svg-focus" viewBox="0 0 200 200">
+            <defs>
+              <radialGradient id="coreGlowFocus" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#3fd8e8" stop-opacity="1"/>
+                <stop offset="100%" stop-color="#1f7684" stop-opacity="0.15"/>
+              </radialGradient>
+            </defs>
+            <circle class="core-outer-ring" cx="100" cy="100" r="94"></circle>
+            <circle class="core-dotted-ring" cx="100" cy="100" r="70"></circle>
+            <circle class="core-arc-ring" cx="100" cy="100" r="52"></circle>
+            <circle class="core-glow" cx="100" cy="100" r="24" fill="url(#coreGlowFocus)"></circle>
+          </svg>
+          <div class="core-caption">idle</div>
+        </div>
+        <p id="jarvis-caption" class="jarvis-caption">Ask me something or give me a task — what I say will show up here.</p>
+      </section>
+
+    </div>
+
+    <aside class="side-panel">
+      <div class="core-wrap" id="core-wrap">
+        <svg id="core-svg" class="core-svg" viewBox="0 0 200 200">
+          <defs>
+            <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#3fd8e8" stop-opacity="1"/>
+              <stop offset="100%" stop-color="#1f7684" stop-opacity="0.15"/>
+            </radialGradient>
+          </defs>
+          <circle class="core-outer-ring" cx="100" cy="100" r="94"></circle>
+          <circle class="core-dotted-ring" cx="100" cy="100" r="70"></circle>
+          <circle class="core-arc-ring" cx="100" cy="100" r="52"></circle>
+          <circle class="core-glow" cx="100" cy="100" r="24" fill="url(#coreGlow)"></circle>
+        </svg>
+        <div class="core-caption" id="core-caption">idle</div>
+      </div>
+
+      <div class="panel-block">
+        <span class="eyebrow">system</span>
+        <div id="sys-info" class="sys-grid">
+          <div class="sys-row"><span>CPU</span><span id="sys-cpu">—</span></div>
+          <div class="sys-row"><span>Memory</span><span id="sys-mem">—</span></div>
+          <div class="sys-row"><span>Battery</span><span id="sys-batt">—</span></div>
+        </div>
+      </div>
+
+      <div class="panel-block grow">
+        <span class="eyebrow">activity log</span>
+        <div id="log-list" class="log-list"></div>
+      </div>
+    </aside>
+
+  </main>
+
+</div>
+
+<!-- Settings dialog -->
+<div class="overlay" id="settings-overlay">
+  <div class="confirm-card wide">
+    <span class="eyebrow">settings</span>
+    <h2>Configure</h2>
+
+    <label class="field-label">Provider</label>
+    <div class="provider-tabs">
+      <button class="provider-tab" data-provider="openrouter">OpenRouter</button>
+      <button class="provider-tab" data-provider="ollama">Ollama (local)</button>
+      <button class="provider-tab" data-provider="google">Google AI Studio</button>
+    </div>
+
+    <div class="provider-pane" id="pane-openrouter">
+      <label class="field-label">OpenRouter API key</label>
+      <input type="password" id="openrouter-key" placeholder="sk-or-...">
+      <p class="hint" id="openrouter-key-hint"></p>
+      <label class="field-label">Model ID</label>
+      <input type="text" id="openrouter-model" placeholder="an id from openrouter.ai/models that supports tool calling">
+      <p class="hint">Get a key at openrouter.ai/keys. Pick a tool-calling-capable model from openrouter.ai/models.</p>
+    </div>
+
+    <div class="provider-pane" id="pane-ollama">
+      <label class="field-label">Ollama base URL</label>
+      <input type="text" id="ollama-url" placeholder="http://localhost:11434">
+      <label class="field-label">Model</label>
+      <div class="row-inline">
+        <input type="text" id="ollama-model" placeholder="e.g. llama3.1" list="ollama-model-list">
+        <datalist id="ollama-model-list"></datalist>
+        <button class="btn ghost small" id="ollama-refresh">Fetch installed</button>
+      </div>
+      <p class="hint" id="ollama-hint">Requires Ollama running locally (<code>ollama serve</code>) with a tool-calling-capable model pulled, e.g. <code>ollama pull llama3.1</code>. No API key needed.</p>
+    </div>
+
+    <div class="provider-pane" id="pane-google">
+      <label class="field-label">Google AI Studio API key</label>
+      <input type="password" id="google-key" placeholder="AIza...">
+      <p class="hint" id="google-key-hint"></p>
+      <label class="field-label">Model ID</label>
+      <input type="text" id="google-model" placeholder="e.g. gemini-2.5-flash">
+      <p class="hint">Get a key at aistudio.google.com/apikey.</p>
+    </div>
+
+    <label class="field-label">Voice</label>
+    <div class="voice-settings">
+      <label class="checkbox-row"><input type="checkbox" id="voice-replies-toggle"> Speak replies aloud</label>
+      <label class="checkbox-row"><input type="checkbox" id="clap-toggle"> Listen for a double-clap to start voice input</label>
+      <label class="field-label" style="margin-top:10px;">Whisper model (speech-to-text, runs locally)</label>
+      <select id="whisper-model-select">
+        <option value="tiny">tiny — fastest, least accurate</option>
+        <option value="base">base — good default on CPU</option>
+        <option value="small">small — more accurate, slower</option>
+        <option value="medium">medium — needs a decent CPU/GPU</option>
+        <option value="large-v3">large-v3 — best accuracy, needs a GPU to be fast</option>
+      </select>
+      <p class="hint" id="voice-support-hint"></p>
+    </div>
+
+    <div class="confirm-actions">
+      <button class="btn ghost" id="settings-cancel">Close</button>
+      <button class="btn primary" id="settings-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
