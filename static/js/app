@@ -1,0 +1,1029 @@
+// ============================================================
+// Element refs
+// ============================================================
+const chatScroll = document.getElementById('chat-scroll');
+const chatInput = document.getElementById('chat-input');
+const sendBtn = document.getElementById('send-btn');
+const attachBtn = document.getElementById('attach-btn');
+const fileInput = document.getElementById('file-input');
+const composerAttachments = document.getElementById('composer-attachments');
+const micBtn = document.getElementById('mic-btn');
+const voiceHint = document.getElementById('voice-hint');
+
+const coreWraps = document.querySelectorAll('.core-wrap');
+const coreCaptions = document.querySelectorAll('.core-caption');
+const jarvisCaption = document.getElementById('jarvis-caption');
+const layoutEl = document.querySelector('.layout');
+const connStatus = document.getElementById('conn-status');
+const logList = document.getElementById('log-list');
+
+const tabs = document.querySelectorAll('.tab');
+const panels = document.querySelectorAll('.tab-panel');
+const tabNotifBadge = document.getElementById('tab-notif-badge');
+
+const notifList = document.getElementById('notif-list');
+const chatsList = document.getElementById('chats-list');
+
+const taskInput = document.getElementById('task-input');
+const taskAddBtn = document.getElementById('task-add-btn');
+const taskList = document.getElementById('task-list');
+
+const filesUploadBtn = document.getElementById('files-upload-btn');
+const filesTabInput = document.getElementById('files-tab-input');
+const fileListEl = document.getElementById('file-list');
+
+const newChatBtn = document.getElementById('new-chat-btn');
+
+const settingsBtn = document.getElementById('settings-btn');
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsCancel = document.getElementById('settings-cancel');
+const settingsSave = document.getElementById('settings-save');
+
+const providerTabs = document.querySelectorAll('.provider-tab');
+const providerPanes = {
+  openrouter: document.getElementById('pane-openrouter'),
+  ollama: document.getElementById('pane-ollama'),
+  google: document.getElementById('pane-google'),
+};
+let currentProvider = 'openrouter';
+
+const openrouterKey = document.getElementById('openrouter-key');
+const openrouterModel = document.getElementById('openrouter-model');
+const openrouterKeyHint = document.getElementById('openrouter-key-hint');
+
+const ollamaUrl = document.getElementById('ollama-url');
+const ollamaModel = document.getElementById('ollama-model');
+const ollamaModelList = document.getElementById('ollama-model-list');
+const ollamaRefresh = document.getElementById('ollama-refresh');
+const ollamaHint = document.getElementById('ollama-hint');
+
+const googleKey = document.getElementById('google-key');
+const googleModel = document.getElementById('google-model');
+const googleKeyHint = document.getElementById('google-key-hint');
+
+const voiceRepliesToggle = document.getElementById('voice-replies-toggle');
+const clapToggle = document.getElementById('clap-toggle');
+const voiceSupportHint = document.getElementById('voice-support-hint');
+const whisperModelSelect = document.getElementById('whisper-model-select');
+
+// ============================================================
+// State
+// ============================================================
+let conversationId = localStorage.getItem('conv_id') || null;
+let pendingAttachments = []; // [{id, name, ext, category, size}]
+
+// ============================================================
+// Core visualization (SVG radial-tick "arc reactor" style dial)
+// ============================================================
+function buildCoreTicks(svgId) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+  const NS = 'http://www.w3.org/2000/svg';
+  const g = document.createElementNS(NS, 'g');
+  g.setAttribute('class', 'core-ticks');
+  const count = 48, cx = 100, cy = 100, innerR = 82, outerRShort = 90, outerRLong = 97;
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+    const isLong = i % 4 === 0;
+    const outerR = isLong ? outerRLong : outerRShort;
+    const line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', (cx + innerR * Math.cos(angle)).toFixed(2));
+    line.setAttribute('y1', (cy + innerR * Math.sin(angle)).toFixed(2));
+    line.setAttribute('x2', (cx + outerR * Math.cos(angle)).toFixed(2));
+    line.setAttribute('y2', (cy + outerR * Math.sin(angle)).toFixed(2));
+    line.setAttribute('class', isLong ? 'tick tick-long' : 'tick');
+    g.appendChild(line);
+  }
+  svg.appendChild(g);
+}
+
+function updateCoreCaption() {
+  const active = coreWraps[0]; // all core-wraps are kept in sync, so one is representative
+  let state = 'idle';
+  if (active && active.classList.contains('listening')) state = 'listening…';
+  else if (active && active.classList.contains('speaking')) state = 'speaking…';
+  else if (active && active.classList.contains('thinking')) state = 'thinking…';
+  coreCaptions.forEach(el => { el.textContent = state; });
+}
+
+function setThinking(on) {
+  coreWraps.forEach(el => el.classList.toggle('thinking', on));
+  sendBtn.disabled = on;
+  updateCoreCaption();
+}
+
+// ============================================================
+// Chat helpers
+// ============================================================
+function addMessage(role, text) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const p = document.createElement('p');
+  p.textContent = text;
+  div.appendChild(p);
+  chatScroll.appendChild(div);
+  chatScroll.scrollTop = chatScroll.scrollHeight;
+  return div;
+}
+
+function addActionNote(text) {
+  const div = document.createElement('div');
+  div.className = 'msg action-note';
+  div.textContent = text;
+  chatScroll.appendChild(div);
+  chatScroll.scrollTop = chatScroll.scrollHeight;
+}
+
+function logEvent(text, status) {
+  const row = document.createElement('div');
+  row.className = `log-entry ${status || ''}`;
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  row.innerHTML = `<span class="t">${time}</span>${text}`;
+  logList.prepend(row);
+}
+
+function humanizeToolName(name) {
+  return name.replace(/_/g, ' ');
+}
+
+function humanSize(n) {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  n = Number(n) || 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i === 0 ? 0 : 1)}${units[i]}`;
+}
+
+function timeAgo(unixSeconds) {
+  const diff = Date.now() / 1000 - unixSeconds;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return new Date(unixSeconds * 1000).toLocaleDateString();
+}
+
+function fileIcon(category) {
+  const map = { text: '📄', pdf: '📕', docx: '📘', doc_legacy: '📘', image: '🖼️', audio: '🎵', video: '🎬', other: '📎' };
+  return map[category] || '📎';
+}
+
+function extractTextFromContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const textBlock = content.find(b => b.type === 'text');
+    return textBlock ? textBlock.text : '[attachment]';
+  }
+  return '';
+}
+
+// ============================================================
+// Tabs
+// ============================================================
+function switchTab(name) {
+  tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  panels.forEach(p => p.classList.toggle('active', p.id === `panel-${name}`));
+  layoutEl.classList.toggle('focus-mode', name === 'core');
+  if (name === 'notifications') refreshNotifications();
+  if (name === 'history') refreshChats();
+  if (name === 'files') refreshFiles();
+  if (name === 'tasks') refreshTasks();
+}
+tabs.forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+// ============================================================
+// Composer: textarea auto-resize + Shift+Enter
+// ============================================================
+function autoResizeInput() {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 160) + 'px';
+}
+chatInput.addEventListener('input', autoResizeInput);
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+  // Shift+Enter falls through to the browser default: insert a newline.
+});
+
+// ============================================================
+// Attachments
+// ============================================================
+attachBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', async () => {
+  if (!fileInput.files.length) return;
+  await uploadFiles(fileInput.files, { attach: true });
+  fileInput.value = '';
+});
+
+async function uploadFiles(fileList, { attach = true } = {}) {
+  const formData = new FormData();
+  for (const f of fileList) formData.append('files', f);
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.ok) {
+      if (attach) {
+        data.files.forEach(f => pendingAttachments.push(f));
+        renderAttachmentChips();
+      }
+      logEvent(`Uploaded ${data.files.length} file(s)`, 'ok');
+      return data.files;
+    }
+    addMessage('error', data.error || 'Upload failed.');
+  } catch (e) {
+    addMessage('error', "Couldn't reach the local server to upload files.");
+  }
+  return [];
+}
+
+function renderAttachmentChips() {
+  composerAttachments.innerHTML = '';
+  pendingAttachments.forEach(f => {
+    const chip = document.createElement('div');
+    chip.className = 'attachment-chip';
+    const label = document.createElement('span');
+    label.textContent = `${fileIcon(f.category)} ${f.name}`;
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'chip-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove';
+    removeBtn.addEventListener('click', () => {
+      pendingAttachments = pendingAttachments.filter(x => x.id !== f.id);
+      renderAttachmentChips();
+    });
+    chip.appendChild(label);
+    chip.appendChild(removeBtn);
+    composerAttachments.appendChild(chip);
+  });
+}
+
+// ============================================================
+// Chat send / receive
+// ============================================================
+async function sendMessage() {
+  const text = chatInput.value.trim();
+  if (!text && pendingAttachments.length === 0) return;
+
+  const attachmentIds = pendingAttachments.map(f => f.id);
+  const attachmentNames = pendingAttachments.map(f => f.name);
+  chatInput.value = '';
+  autoResizeInput();
+  pendingAttachments = [];
+  renderAttachmentChips();
+
+  let displayText = text;
+  if (attachmentNames.length) {
+    displayText += (displayText ? '\n' : '') + `📎 ${attachmentNames.join(', ')}`;
+  }
+  addMessage('user', displayText);
+  setThinking(true);
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: conversationId, message: text, attachment_ids: attachmentIds }),
+    });
+    const data = await res.json();
+    handleAgentResponse(data);
+  } catch (e) {
+    setThinking(false);
+    addMessage('error', 'Could not reach the local server. Is app.py still running?');
+  }
+}
+sendBtn.addEventListener('click', sendMessage);
+
+function handleAgentResponse(data) {
+  if (data.conversation_id) {
+    conversationId = data.conversation_id;
+    localStorage.setItem('conv_id', conversationId);
+  }
+
+  if (data.type === 'final') {
+    setThinking(false);
+    const message = data.message || '(no response)';
+    addMessage('assistant', message);
+    speak(message);
+  } else if (data.type === 'error') {
+    setThinking(false);
+    addMessage('error', data.message);
+  } else if (data.type === 'confirm') {
+    setThinking(false);
+    if (data.assistant_note) {
+      addMessage('assistant', data.assistant_note);
+      speak(data.assistant_note);
+    }
+    addActionNote(`🔔 Needs approval — "${humanizeToolName(data.name)}". Switched to Notifications.`);
+    refreshNotifications();
+    switchTab('notifications');
+  }
+}
+
+function describeAction(name, args) {
+  const map = {
+    close_application: `Force-close "${args.app_name}". Unsaved work in it may be lost.`,
+    shutdown_computer: `Shut down this computer in ${args.delay_seconds ?? 30} seconds.`,
+    restart_computer: `Restart this computer in ${args.delay_seconds ?? 30} seconds.`,
+    sleep_computer: `Put this computer to sleep right now.`,
+    cancel_shutdown: `Cancel a pending shutdown or restart.`,
+    delete_file: `Permanently delete the file at "${args.path}".`,
+    empty_recycle_bin: `Permanently empty the Recycle Bin.`,
+    run_shell_command: `Run this PowerShell command on your machine:`,
+    uninstall_hint: `Open Apps & Features so you can uninstall "${args.app_name}" yourself.`,
+  };
+  return map[name] || 'This action changes something on your system.';
+}
+
+// ============================================================
+// Notifications tab
+// ============================================================
+function renderNotifications(items) {
+  const pendingCount = items.filter(n => n.status === 'pending').length;
+  tabNotifBadge.textContent = pendingCount > 0 ? String(pendingCount) : '';
+
+  if (!items.length) {
+    notifList.innerHTML = '<p class="hint">No notifications yet.</p>';
+    return;
+  }
+
+  notifList.innerHTML = '';
+  items.forEach(n => {
+    const card = document.createElement('div');
+    card.className = `notif-card ${n.status}`;
+
+    const head = document.createElement('div');
+    head.className = 'notif-head';
+    head.innerHTML = `<span>${humanizeToolName(n.name)}</span><span class="notif-status ${n.status}">${n.status}</span>`;
+    card.appendChild(head);
+
+    const desc = document.createElement('p');
+    desc.textContent = describeAction(n.name, n.args);
+    card.appendChild(desc);
+
+    if (n.args && Object.keys(n.args).length) {
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(n.args, null, 2);
+      card.appendChild(pre);
+    }
+
+    if (n.status === 'pending') {
+      const actions = document.createElement('div');
+      actions.className = 'notif-actions';
+      const denyBtn = document.createElement('button');
+      denyBtn.className = 'btn ghost';
+      denyBtn.textContent = 'Deny';
+      denyBtn.addEventListener('click', () => resolveNotification(n, false));
+      const approveBtn = document.createElement('button');
+      approveBtn.className = 'btn danger';
+      approveBtn.textContent = 'Approve';
+      approveBtn.addEventListener('click', () => resolveNotification(n, true));
+      actions.appendChild(denyBtn);
+      actions.appendChild(approveBtn);
+      card.appendChild(actions);
+    } else {
+      const when = document.createElement('p');
+      when.className = 'hint';
+      when.textContent = timeAgo(n.resolved_at || n.created_at);
+      card.appendChild(when);
+    }
+
+    notifList.appendChild(card);
+  });
+}
+
+async function refreshNotifications() {
+  try {
+    const res = await fetch('/api/notifications');
+    const data = await res.json();
+    renderNotifications(data.notifications || []);
+  } catch (e) { /* server may be restarting — try again on next poll */ }
+}
+
+async function resolveNotification(notif, approved) {
+  logEvent(humanizeToolName(notif.name), approved ? 'ok' : 'fail');
+  const isCurrentConversation = notif.conversation_id === conversationId;
+  if (isCurrentConversation) setThinking(true);
+
+  try {
+    const res = await fetch('/api/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: notif.conversation_id, approved }),
+    });
+    const data = await res.json();
+    if (isCurrentConversation) {
+      addActionNote(`${approved ? '✔ approved' : '✘ denied'} — ${humanizeToolName(notif.name)}`);
+      handleAgentResponse(data);
+    }
+  } catch (e) {
+    if (isCurrentConversation) {
+      setThinking(false);
+      addMessage('error', 'Lost connection while confirming that action.');
+    }
+  }
+  refreshNotifications();
+}
+
+// ============================================================
+// History tab
+// ============================================================
+async function refreshChats() {
+  try {
+    const res = await fetch('/api/chats');
+    const data = await res.json();
+    const items = data.chats || [];
+    if (!items.length) {
+      chatsList.innerHTML = '<p class="hint">No saved chats yet.</p>';
+      return;
+    }
+    chatsList.innerHTML = '';
+    items.forEach(c => {
+      const card = document.createElement('div');
+      card.className = 'chat-card';
+      card.innerHTML = `<span class="chat-title">${c.title || '(untitled)'}</span><span class="chat-time">${timeAgo(c.updated_at)}</span>`;
+      card.addEventListener('click', () => loadChat(c.id));
+      chatsList.appendChild(card);
+    });
+  } catch (e) {
+    chatsList.innerHTML = '<p class="hint">Could not reach the local server.</p>';
+  }
+}
+
+async function loadChat(id) {
+  try {
+    const res = await fetch(`/api/chats/${id}`);
+    const data = await res.json();
+    if (!data.ok) return;
+
+    conversationId = id;
+    localStorage.setItem('conv_id', conversationId);
+
+    chatScroll.innerHTML = '';
+    (data.chat.messages || []).forEach(m => {
+      if (m.role === 'user') addMessage('user', extractTextFromContent(m.content));
+      else if (m.role === 'assistant' && m.content) addMessage('assistant', extractTextFromContent(m.content));
+      // tool-call/tool-result messages are skipped in the replay view — the
+      // activity log and notifications history cover that level of detail.
+    });
+    switchTab('chat');
+  } catch (e) {
+    addMessage('error', "Couldn't load that chat.");
+  }
+}
+
+newChatBtn.addEventListener('click', () => {
+  conversationId = null;
+  localStorage.removeItem('conv_id');
+  chatScroll.innerHTML = '';
+  addActionNote('New chat started.');
+});
+
+// ============================================================
+// Tasks tab
+// ============================================================
+async function refreshTasks() {
+  try {
+    const res = await fetch('/api/tasks');
+    const data = await res.json();
+    renderTasks(data.tasks || []);
+  } catch (e) {
+    taskList.innerHTML = '<p class="hint">Could not reach the local server.</p>';
+  }
+}
+
+function renderTasks(tasks) {
+  if (!tasks.length) {
+    taskList.innerHTML = '<p class="hint">No tasks yet.</p>';
+    return;
+  }
+  taskList.innerHTML = '';
+  tasks.forEach(t => {
+    const card = document.createElement('div');
+    card.className = `task-card ${t.done ? 'done' : ''}`;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = t.done;
+    checkbox.addEventListener('change', () => toggleTask(t.id, checkbox.checked));
+
+    const textEl = document.createElement('span');
+    textEl.className = 'task-text';
+    textEl.textContent = t.text;
+
+    const actions = document.createElement('div');
+    actions.className = 'task-actions';
+
+    const runBtn = document.createElement('button');
+    runBtn.className = 'btn small';
+    runBtn.textContent = 'Run';
+    runBtn.addEventListener('click', () => runTask(t.text));
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn ghost small';
+    delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', () => deleteTask(t.id));
+
+    actions.appendChild(runBtn);
+    actions.appendChild(delBtn);
+    card.appendChild(checkbox);
+    card.appendChild(textEl);
+    card.appendChild(actions);
+    taskList.appendChild(card);
+  });
+}
+
+async function addTask() {
+  const text = taskInput.value.trim();
+  if (!text) return;
+  taskInput.value = '';
+  try {
+    await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    refreshTasks();
+  } catch (e) { /* ignore */ }
+}
+taskAddBtn.addEventListener('click', addTask);
+taskInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addTask(); });
+
+async function toggleTask(id, done) {
+  await fetch(`/api/tasks/${id}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ done }),
+  });
+  refreshTasks();
+}
+
+async function deleteTask(id) {
+  await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+  refreshTasks();
+}
+
+function runTask(text) {
+  switchTab('chat');
+  chatInput.value = text;
+  autoResizeInput();
+  sendMessage();
+}
+
+// ============================================================
+// Files tab
+// ============================================================
+filesUploadBtn.addEventListener('click', () => filesTabInput.click());
+filesTabInput.addEventListener('change', async () => {
+  if (!filesTabInput.files.length) return;
+  await uploadFiles(filesTabInput.files, { attach: false });
+  filesTabInput.value = '';
+  refreshFiles();
+});
+
+async function refreshFiles() {
+  try {
+    const res = await fetch('/api/uploads');
+    const data = await res.json();
+    renderFiles(data.files || []);
+  } catch (e) {
+    fileListEl.innerHTML = '<p class="hint">Could not reach the local server.</p>';
+  }
+}
+
+function renderFiles(files) {
+  if (!files.length) {
+    fileListEl.innerHTML = '<p class="hint">No files uploaded yet.</p>';
+    return;
+  }
+  fileListEl.innerHTML = '';
+  files.forEach(f => {
+    const card = document.createElement('div');
+    card.className = 'file-card';
+    const icon = document.createElement('span');
+    icon.className = 'file-icon';
+    icon.textContent = fileIcon(f.category);
+    const meta = document.createElement('div');
+    meta.className = 'file-meta';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'file-name';
+    nameEl.textContent = f.name;
+    const subEl = document.createElement('div');
+    subEl.className = 'file-sub';
+    subEl.textContent = `${humanSize(f.size)} · ${f.category} · ${timeAgo(f.uploaded_at)}`;
+    meta.appendChild(nameEl);
+    meta.appendChild(subEl);
+    card.appendChild(icon);
+    card.appendChild(meta);
+    fileListEl.appendChild(card);
+  });
+}
+
+// ============================================================
+// Settings: provider tabs + config load/save
+// ============================================================
+function switchProviderTab(provider) {
+  currentProvider = provider;
+  providerTabs.forEach(btn => btn.classList.toggle('active', btn.dataset.provider === provider));
+  Object.entries(providerPanes).forEach(([key, pane]) => pane.classList.toggle('active', key === provider));
+}
+providerTabs.forEach(btn => btn.addEventListener('click', () => switchProviderTab(btn.dataset.provider)));
+
+async function loadConfigIntoUI() {
+  const res = await fetch('/api/config');
+  const cfg = await res.json();
+
+  switchProviderTab(cfg.provider || 'openrouter');
+
+  openrouterModel.value = cfg.openrouter.model || '';
+  openrouterKeyHint.textContent = cfg.openrouter.has_key ? `Current key: ${cfg.openrouter.masked_key}` : 'No key saved yet.';
+
+  googleModel.value = cfg.google.model || '';
+  googleKeyHint.textContent = cfg.google.has_key ? `Current key: ${cfg.google.masked_key}` : 'No key saved yet.';
+
+  ollamaUrl.value = cfg.ollama.base_url || 'http://localhost:11434';
+  ollamaModel.value = cfg.ollama.model || '';
+
+  whisperModelSelect.value = cfg.whisper.model_size || 'base';
+  whisperAvailable = cfg.whisper.available;
+
+  const configured =
+    (cfg.provider === 'openrouter' && cfg.openrouter.has_key && cfg.openrouter.model) ||
+    (cfg.provider === 'google' && cfg.google.has_key && cfg.google.model) ||
+    (cfg.provider === 'ollama' && cfg.ollama.model);
+
+  connStatus.innerHTML = configured
+    ? `<span class="led on"></span>${cfg.provider}`
+    : '<span class="led off"></span>Not configured';
+}
+
+settingsBtn.addEventListener('click', async () => {
+  settingsOverlay.classList.add('show');
+  await loadConfigIntoUI();
+  loadVoiceSettingsIntoUI();
+});
+settingsCancel.addEventListener('click', () => settingsOverlay.classList.remove('show'));
+
+ollamaRefresh.addEventListener('click', async () => {
+  ollamaHint.textContent = 'Checking…';
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ollama: { base_url: ollamaUrl.value.trim() } }),
+  });
+  try {
+    const res = await fetch('/api/ollama/models');
+    const data = await res.json();
+    if (data.ok) {
+      ollamaModelList.innerHTML = data.models.map(m => `<option value="${m}">`).join('');
+      ollamaHint.textContent = data.models.length
+        ? `Found ${data.models.length} model(s) — pick one from the list or type a name.`
+        : 'Connected, but no models pulled yet. Run e.g. "ollama pull llama3.1".';
+    } else {
+      ollamaHint.textContent = data.error;
+    }
+  } catch (e) {
+    ollamaHint.textContent = 'Could not reach the local server to check Ollama.';
+  }
+});
+
+settingsSave.addEventListener('click', async () => {
+  const body = {
+    provider: currentProvider,
+    openrouter: { model: openrouterModel.value.trim() },
+    google: { model: googleModel.value.trim() },
+    ollama: { base_url: ollamaUrl.value.trim(), model: ollamaModel.value.trim() },
+    whisper: { model_size: whisperModelSelect.value },
+  };
+  if (openrouterKey.value.trim()) body.openrouter.api_key = openrouterKey.value.trim();
+  if (googleKey.value.trim()) body.google.api_key = googleKey.value.trim();
+
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  openrouterKey.value = '';
+  googleKey.value = '';
+  saveVoiceSettingsFromUI();
+  await loadConfigIntoUI();
+  settingsOverlay.classList.remove('show');
+});
+
+// ============================================================
+// System info polling
+// ============================================================
+async function pollSystemInfo() {
+  try {
+    const res = await fetch('/api/system-info');
+    const data = await res.json();
+    if (data.ok) {
+      const i = data.info;
+      document.getElementById('sys-cpu').textContent = i.cpu_percent != null ? `${i.cpu_percent}%` : '—';
+      document.getElementById('sys-mem').textContent = i.memory_percent != null ? `${i.memory_percent}% (${i.memory_used_gb}/${i.memory_total_gb} GB)` : '—';
+      document.getElementById('sys-batt').textContent = i.battery_percent != null ? `${i.battery_percent}%${i.battery_plugged ? ' ⚡' : ''}` : 'n/a';
+    }
+  } catch (e) { /* server may not be Windows / psutil missing — ignore */ }
+}
+
+// ============================================================
+// Voice: text-to-speech (JARVIS talks -> core pulses outward + caption shows)
+// Captions and the core's "speaking" pulse happen regardless of whether
+// audio is enabled, so the Core tab is useful even with voice replies off.
+// ============================================================
+const ttsSupported = 'speechSynthesis' in window;
+let voiceRepliesEnabled = localStorage.getItem('jarvis_voice_replies') === '1';
+let silentSpeakTimer = null;
+
+function showCaption(text) {
+  if (jarvisCaption) jarvisCaption.textContent = text;
+}
+
+function setSpeaking(on) {
+  coreWraps.forEach(el => el.classList.toggle('speaking', on));
+  updateCoreCaption();
+}
+
+function estimateSpeakingDuration(text) {
+  // Rough reading-speed estimate, used only when audio is off so the Core
+  // tab still visibly "talks" in sync with the caption appearing.
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const ms = (words / 2.5) * 1000; // ~150 words/minute
+  return Math.max(1200, Math.min(ms, 12000));
+}
+
+function speak(text) {
+  if (!text) return;
+  showCaption(text);
+  clearTimeout(silentSpeakTimer);
+
+  if (voiceRepliesEnabled && ttsSupported) {
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.onstart = () => setSpeaking(true);
+    const stop = () => setSpeaking(false);
+    utter.onend = stop;
+    utter.onerror = stop;
+    window.speechSynthesis.speak(utter);
+  } else {
+    setSpeaking(true);
+    silentSpeakTimer = setTimeout(() => setSpeaking(false), estimateSpeakingDuration(text));
+  }
+}
+
+// ============================================================
+// Voice: speech-to-text via local Whisper (faster-whisper on the server).
+// The mic records audio in the browser (MediaRecorder), sends it to
+// /api/transcribe, and Whisper runs entirely on your machine — no cloud
+// speech service involved, unlike the browser's built-in Web Speech API.
+// ============================================================
+const recordingSupported = 'MediaRecorder' in window && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+let isListening = false;
+let mediaRecorder = null;
+let recordedChunks = [];
+let silenceLoopId = null;
+
+function pickRecorderMimeType() {
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+  for (const c of candidates) {
+    if (window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return '';
+}
+
+async function startRecording(sharedStream) {
+  if (!recordingSupported) {
+    voiceHint.textContent = "This browser doesn't support microphone recording (MediaRecorder API missing).";
+    return;
+  }
+  if (isListening) return;
+
+  let stream = sharedStream;
+  let ownStream = false;
+  if (!stream) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      ownStream = true;
+    } catch (e) {
+      voiceHint.textContent = 'Microphone permission denied.';
+      return;
+    }
+  }
+
+  recordedChunks = [];
+  const mimeType = pickRecorderMimeType();
+  try {
+    mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  } catch (e) {
+    voiceHint.textContent = `Could not start recording: ${e.message}`;
+    if (ownStream) stream.getTracks().forEach(t => t.stop());
+    return;
+  }
+
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+    mediaRecorder = null;
+    if (ownStream) stream.getTracks().forEach(t => t.stop());
+    await transcribeBlob(blob);
+  };
+
+  mediaRecorder.start();
+  isListening = true;
+  micBtn.classList.add('listening');
+  coreWraps.forEach(el => el.classList.add('listening'));
+  updateCoreCaption();
+  voiceHint.textContent = 'Listening… click the mic to stop, or pause and it stops on its own.';
+
+  monitorForSilence(stream);
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  isListening = false;
+  micBtn.classList.remove('listening');
+  coreWraps.forEach(el => el.classList.remove('listening'));
+  updateCoreCaption();
+  if (silenceLoopId) { cancelAnimationFrame(silenceLoopId); silenceLoopId = null; }
+}
+
+function monitorForSilence(stream) {
+  // Short-lived analysis just for auto-stopping a recording after a pause —
+  // separate from the always-on clap-detection analyser below.
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = ctx.createMediaStreamSource(stream);
+  const localAnalyser = ctx.createAnalyser();
+  localAnalyser.fftSize = 1024;
+  source.connect(localAnalyser);
+  const data = new Uint8Array(localAnalyser.fftSize);
+
+  const SPEECH_THRESHOLD = 12, SILENCE_MS = 1400, MAX_MS = 15000;
+  const startedAt = performance.now();
+  let heardSpeech = false, quietSince = null;
+
+  function finish() {
+    ctx.close();
+    stopRecording();
+  }
+
+  function loop() {
+    if (!mediaRecorder) { ctx.close(); return; } // stopped elsewhere already
+    localAnalyser.getByteTimeDomainData(data);
+    let peak = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i] - 128);
+      if (v > peak) peak = v;
+    }
+    const now = performance.now();
+    if (peak > SPEECH_THRESHOLD) {
+      heardSpeech = true;
+      quietSince = null;
+    } else if (heardSpeech) {
+      if (quietSince === null) quietSince = now;
+      else if (now - quietSince > SILENCE_MS) return finish();
+    }
+    if (now - startedAt > MAX_MS) return finish();
+    silenceLoopId = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+async function transcribeBlob(blob) {
+  if (blob.size < 800) {
+    voiceHint.textContent = "Didn't catch anything — try again.";
+    return;
+  }
+  voiceHint.textContent = 'Transcribing… (first run downloads the Whisper model, this can take a minute)';
+  coreWraps.forEach(el => el.classList.add('thinking'));
+  updateCoreCaption();
+
+  try {
+    const formData = new FormData();
+    formData.append('audio', blob, 'speech.webm');
+    const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+    const data = await res.json();
+    coreWraps.forEach(el => el.classList.remove('thinking'));
+    updateCoreCaption();
+
+    if (data.ok) {
+      const text = (data.text || '').trim();
+      if (text) {
+        chatInput.value = (chatInput.value ? chatInput.value + ' ' : '') + text;
+        autoResizeInput();
+        if (![...tabs].find(t => t.classList.contains('active') && t.dataset.tab === 'chat')) switchTab('chat');
+        voiceHint.textContent = '';
+      } else {
+        voiceHint.textContent = "Didn't catch anything — try again.";
+      }
+    } else {
+      voiceHint.textContent = data.error || 'Transcription failed.';
+    }
+  } catch (e) {
+    coreWraps.forEach(el => el.classList.remove('thinking'));
+    updateCoreCaption();
+    voiceHint.textContent = "Couldn't reach the local server to transcribe.";
+  }
+}
+
+micBtn.addEventListener('click', () => { isListening ? stopRecording() : startRecording(); });
+
+if (!recordingSupported) {
+  micBtn.disabled = true;
+  micBtn.title = "This browser doesn't support microphone recording";
+}
+
+// ============================================================
+// Voice: clap-to-activate (Web Audio API amplitude spike detector)
+// Fully local — no audio is sent anywhere for clap detection itself. When
+// two claps land in quick succession, it starts the same Whisper recording
+// flow as clicking the mic, reusing this same mic stream.
+// ============================================================
+let clapStream = null, audioCtx = null, analyser = null, clapRafId = null;
+let clapTimestamps = [];
+
+async function startClapDetection() {
+  if (audioCtx) return;
+  try {
+    clapStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    voiceHint.textContent = "Couldn't access the microphone for clap detection.";
+    clapToggle.checked = false;
+    localStorage.setItem('jarvis_clap_toggle', '0');
+    return;
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaStreamSource(clapStream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.fftSize);
+  let cooldownUntil = 0;
+
+  function loop() {
+    analyser.getByteTimeDomainData(data);
+    let peak = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i] - 128);
+      if (v > peak) peak = v;
+    }
+    const now = performance.now();
+    if (peak > 80 && now > cooldownUntil) {
+      cooldownUntil = now + 250;
+      clapTimestamps.push(now);
+      clapTimestamps = clapTimestamps.filter(t => now - t < 900);
+      if (clapTimestamps.length >= 2) {
+        clapTimestamps = [];
+        if (!isListening) startRecording(clapStream);
+      }
+    }
+    clapRafId = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function stopClapDetection() {
+  if (clapRafId) cancelAnimationFrame(clapRafId);
+  clapRafId = null;
+  if (clapStream) clapStream.getTracks().forEach(t => t.stop());
+  clapStream = null;
+  if (audioCtx) audioCtx.close();
+  audioCtx = null;
+  analyser = null;
+}
+
+let whisperAvailable = true; // updated from /api/config each time Settings opens
+
+function loadVoiceSettingsIntoUI() {
+  voiceRepliesToggle.checked = voiceRepliesEnabled;
+  clapToggle.checked = localStorage.getItem('jarvis_clap_toggle') === '1';
+  const notes = [];
+  if (!ttsSupported) notes.push('Speech synthesis (voice replies) is not supported in this browser.');
+  if (!recordingSupported) notes.push('Voice input needs a browser with MediaRecorder support (all modern browsers have this).');
+  if (!('mediaDevices' in navigator)) notes.push('Clap detection needs microphone access, which this context does not allow (use http://127.0.0.1 or https).');
+  if (!whisperAvailable) notes.push("faster-whisper isn't installed on the server — voice input won't work until you run: pip install faster-whisper");
+  voiceSupportHint.textContent = notes.join(' ');
+}
+
+function saveVoiceSettingsFromUI() {
+  voiceRepliesEnabled = voiceRepliesToggle.checked;
+  localStorage.setItem('jarvis_voice_replies', voiceRepliesEnabled ? '1' : '0');
+
+  const wantsClap = clapToggle.checked;
+  localStorage.setItem('jarvis_clap_toggle', wantsClap ? '1' : '0');
+  if (wantsClap) startClapDetection(); else stopClapDetection();
+}
+
+// ============================================================
+// Init
+// ============================================================
+buildCoreTicks('core-svg');
+buildCoreTicks('core-svg-focus');
+loadConfigIntoUI();
+pollSystemInfo();
+refreshNotifications();
+setInterval(pollSystemInfo, 8000);
+setInterval(refreshNotifications, 5000);
+
+if (localStorage.getItem('jarvis_clap_toggle') === '1') {
+  startClapDetection();
+}
