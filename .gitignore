@@ -1,0 +1,7 @@
+config.json
+tasks.json
+chats/*.json
+uploads/*
+!uploads/README.md
+__pycache__/
+*.pyc

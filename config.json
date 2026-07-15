@@ -1,0 +1,1 @@
+{"provider": "openrouter", "openrouter": {"api_key": "", "model": "nvidia/nemotron-3-ultra-550b-a55b:free"}, "google": {"api_key": "-", "model": "gemma-4-26b-a4b-it"}, "ollama": {"base_url": "http://localhost:11434", "model": "llama3.1:latest"}, "whisper": {"model_size": "base"}}
